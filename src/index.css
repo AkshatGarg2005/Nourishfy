@@ -4,4 +4,5 @@
 
 /* App globals */
 html, body, #root { height: 100%; }
-body { @apply bg-gradient-to-b from-emerald-50 to-white text-neutral-900; }
+/* keep base colors neutral; page background/gradient is handled in Layout and adapts in dark mode */
+body { @apply bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100; }

@@ -13,7 +13,7 @@ export default function FoodCard({ food, imageUrl, emoji, onAdd }) {
         ) : imageUrl ? (
           <img src={imageUrl} alt={food.name} className="w-full h-32 object-cover rounded-lg mb-2" />
         ) : (
-          <div className="w-full h-32 rounded-lg border border-dashed grid place-items-center text-neutral-400 text-sm mb-2">
+          <div className="w-full h-32 rounded-lg border border-dashed grid place-items-center text-neutral-400 dark:text-neutral-500 dark:border-neutral-700 text-sm mb-2">
             Finding image…
           </div>
         )}
