@@ -1,0 +1,47 @@
+import React, { useState } from 'react';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../lib/firebase';
+import { Link, useNavigate } from 'react-router-dom';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { Input } from '../components/ui/input';
+import { Button } from '../components/ui/button';
+
+export default function SignIn() {
+  const [email,setEmail] = useState('');
+  const [password,setPassword] = useState('');
+  const [err,setErr] = useState('');
+  const nav = useNavigate();
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setErr('');
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      nav('/');
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
+  return (
+    <div className="min-h-[100dvh] grid place-items-center px-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Sign in</CardTitle>
+          <CardDescription>Welcome back to Nourishfy</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="space-y-3">
+            <Input placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} type="email" />
+            <Input placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} type="password" />
+            <Button type="submit" className="w-full">Sign in</Button>
+            {err && <div className="text-sm text-red-600">{err}</div>}
+          </form>
+          <div className="text-sm mt-3">
+            New here? <Link to="/signup" className="text-emerald-700 underline">Create an account</Link>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
