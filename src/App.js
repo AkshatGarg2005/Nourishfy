@@ -9,6 +9,7 @@ import SignUp from 'pages/SignUp';
 import Profile from 'pages/Profile';
 import Grocery from 'pages/Grocery';
 import Plan from 'pages/Plan';
+import Landing from 'pages/Landing';
 import ProtectedRoute from 'components/ProtectedRoute';
 
 export default function App() {
@@ -23,7 +24,15 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/" element={<ProtectedRoute user={user}><Dashboard/></ProtectedRoute>} />
+      {/* Root shows Landing if not logged in, Dashboard if logged in */}
+      <Route
+        path="/"
+        element={
+          user
+            ? <ProtectedRoute user={user}><Dashboard/></ProtectedRoute>
+            : <Landing/>
+        }
+      />
       <Route path="/plan" element={<ProtectedRoute user={user}><Plan/></ProtectedRoute>} />
       <Route path="/history" element={<ProtectedRoute user={user}><History/></ProtectedRoute>} />
       <Route path="/grocery" element={<ProtectedRoute user={user}><Grocery/></ProtectedRoute>} />
