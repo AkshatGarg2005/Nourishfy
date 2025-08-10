@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { db, watchAuth } from 'lib/firebase';
-import { doc, setDoc, collection, addDoc, serverTimestamp, getDocs, query, orderBy, onSnapshot } from 'firebase/firestore';
+import {
+  doc, setDoc, getDoc, collection, addDoc, serverTimestamp,
+  getDocs, query, orderBy, onSnapshot
+} from 'firebase/firestore';
 import { generatePlan } from 'lib/gemini';
 import { resolveFoodImage } from 'lib/foodImages';
 import Layout from 'components/Layout';
@@ -16,6 +19,7 @@ import { Link, useNavigate } from 'react-router-dom';
 
 const today = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date());
 
+// Fallback preview only when no plan exists yet
 function getPreview(defVals) {
   const d = defVals.map(s => s.toLowerCase());
   if (d.some(x => x.includes('vitamin d'))) {
@@ -29,35 +33,65 @@ function getPreview(defVals) {
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
-  const [defVals, setDefVals] = useState(["Vitamin D"]);
+
+  // Start empty; we’ll restore from Firestore
+  const [defVals, setDefVals] = useState([]);
   const [symVals, setSymVals] = useState([]);
-  const [excVals, setExcVals] = useState(["non veg"]);
+  const [excVals, setExcVals] = useState([]);
+
   const [loading, setLoading] = useState(false);
   const [lastPlan, setLastPlan] = useState(null);
   const [foodImages, setFoodImages] = useState({});
   const nav = useNavigate();
 
+  // Load user, last plan, food image cache, and builder state
   useEffect(() => {
     return watchAuth(async (u) => {
       setUser(u);
-      if (u) {
-        const plansRef = collection(db, 'users', u.uid, 'plans');
-        const qs = await getDocs(query(plansRef, orderBy('createdAt', 'desc')));
-        const items = [];
-        qs.forEach(d => items.push({ id: d.id, ...d.data() }));
-        setLastPlan(items[0] || null);
+      if (!u) return;
 
-        const fiRef = collection(db, 'users', u.uid, 'foodImages');
-        const unsub = onSnapshot(fiRef, (snap) => {
-          const map = {};
-          snap.forEach(d => { const v = d.data(); if (v?.name) map[v.name] = v.url || ''; });
-          setFoodImages(map);
-        });
-        return () => unsub();
+      // Last plan
+      const plansRef = collection(db, 'users', u.uid, 'plans');
+      const qs = await getDocs(query(plansRef, orderBy('createdAt', 'desc')));
+      const items = [];
+      qs.forEach(d => items.push({ id: d.id, ...d.data() }));
+      setLastPlan(items[0] || null);
+
+      // Live image cache
+      const fiRef = collection(db, 'users', u.uid, 'foodImages');
+      const unsub = onSnapshot(fiRef, (snap) => {
+        const map = {};
+        snap.forEach(d => { const v = d.data(); if (v?.name) map[v.name] = v.url || ''; });
+        setFoodImages(map);
+      });
+
+      // Builder persisted state
+      const builderRef = doc(db, 'users', u.uid, 'prefs', 'builder');
+      const builderSnap = await getDoc(builderRef);
+      if (builderSnap.exists()) {
+        const b = builderSnap.data() || {};
+        if (Array.isArray(b.defVals)) setDefVals(b.defVals);
+        if (Array.isArray(b.symVals)) setSymVals(b.symVals);
+        if (Array.isArray(b.excVals)) setExcVals(b.excVals);
       }
+
+      return () => unsub();
     });
   }, []);
 
+  // Persist builder state (debounced)
+  useEffect(() => {
+    if (!user) return;
+    const t = setTimeout(async () => {
+      const builderRef = doc(db, 'users', user.uid, 'prefs', 'builder');
+      await setDoc(builderRef, {
+        defVals, symVals, excVals, updatedAt: serverTimestamp()
+      }, { merge: true });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [user, defVals, symVals, excVals]);
+
+  // Ensure images are cached for foods in the latest plan
   useEffect(() => {
     const run = async () => {
       if (!user || !lastPlan?.output?.foods?.length) return;
@@ -95,15 +129,16 @@ export default function Dashboard() {
         output: { foods: out.foods, groceries: out.groceries, raw: out.raw },
         createdAt: serverTimestamp(),
       });
-      setLastPlan({
+      const newPlan = {
         id: docRef.id,
         inputs: { deficiencies, symptoms, exclusions },
         output: { foods: out.foods, groceries: out.groceries, raw: out.raw },
-      });
+      };
+      setLastPlan(newPlan);
 
       await setDoc(doc(db, 'users', user.uid), { email: user.email, updatedAt: serverTimestamp() }, { merge: true });
 
-      nav('/plan');
+      nav('/plan'); // navigate like the prototype
     } catch (e) {
       alert('Generation failed: ' + e.message);
     } finally {
@@ -113,7 +148,9 @@ export default function Dashboard() {
 
   if (!user) return <div className="p-6">Loading…</div>;
 
-  const preview = getPreview(defVals);
+  // Suggestions: use latest plan’s foods (preview top 2) or fall back to heuristic preview
+  const planSuggestions = (lastPlan?.output?.foods || []).slice(0, 2);
+  const preview = planSuggestions.length ? planSuggestions : getPreview(defVals);
 
   const addPlanGroceriesToList = () => {
     const items = lastPlan?.output?.groceries || [];
@@ -126,10 +163,13 @@ export default function Dashboard() {
 
   return (
     <Layout user={user}>
+      {/* Header */}
       <div className="py-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Welcome back, {user.email?.split('@')[0]}! <span className="text-emerald-600">👋</span></h1>
+            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
+              Welcome back, {user.email?.split('@')[0]}! <span className="text-emerald-600">👋</span>
+            </h1>
             <p className="text-neutral-600">{today}</p>
           </div>
           <div className="flex gap-2">
@@ -140,6 +180,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left */}
         <div className="lg:col-span-8 space-y-6">
           <Card>
             <CardHeader>
@@ -160,23 +201,32 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader>
-              <SectionTitle icon={ChefHat} title="Quick Suggestions" desc="Based on your inputs (preview)"/>
+              <SectionTitle icon={ChefHat} title="Quick Suggestions" desc="Based on your latest plan (or inputs preview)"/>
             </CardHeader>
             <CardContent>
               <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                {preview.map(item => (
-                  <FoodCard
-                    key={item.name}
-                    food={{ name: item.name, why: item.why }}
-                    emoji={item.emoji}
-                    onAdd={()=> window.__addGroceriesFromPlan?.([{ name: item.name, qty: 1, unit: 'pcs' }])}
-                  />
-                ))}
+                {preview.map((item, idx) => {
+                  const key = (item.name || '').toLowerCase();
+                  const url = imagesForFoods[key];
+                  return (
+                    <FoodCard
+                      key={idx}
+                      food={{ name: item.name, why: item.why }}
+                      imageUrl={url}
+                      emoji={item.emoji}
+                      onAdd={() => window.__addGroceriesFromPlan?.([{ name: item.name, qty: 1, unit: 'pcs' }])}
+                    />
+                  );
+                })}
               </div>
               {preview.length > 0 && (
                 <div className="mt-4">
-                  <Button variant="secondary" onClick={()=>window.__addGroceriesFromPlan?.(preview.map(p=>({ name: p.name, qty:1, unit:'pcs'})))}>
-                    <ShoppingCart className="h-4 w-4 mr-2"/>Add {preview.length} items to grocery
+                  <Button
+                    variant="secondary"
+                    onClick={() => window.__addGroceriesFromPlan?.(preview.map(p => ({ name: p.name, qty: 1, unit: 'pcs' })))}
+                  >
+                    <ShoppingCart className="h-4 w-4 mr-2" />
+                    Add {preview.length} items to grocery
                   </Button>
                 </div>
               )}
@@ -184,6 +234,7 @@ export default function Dashboard() {
           </Card>
         </div>
 
+        {/* Right */}
         <aside className="lg:col-span-4 space-y-6">
           <Card>
             <CardHeader>
@@ -205,7 +256,9 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="font-medium">{lastPlan.inputs?.deficiencies || 'Plan'}</div>
-                    <div className="text-xs text-neutral-500">{(lastPlan.output?.foods?.length||0)} foods · {(lastPlan.output?.groceries?.length||0)} items</div>
+                    <div className="text-xs text-neutral-500">
+                      {(lastPlan.output?.foods?.length||0)} foods · {(lastPlan.output?.groceries?.length||0)} items
+                    </div>
                   </div>
                   <Link to="/plan"><Button size="icon" variant="ghost">›</Button></Link>
                 </div>
@@ -217,11 +270,14 @@ export default function Dashboard() {
         </aside>
       </div>
 
+      {/* Grocery on Dashboard */}
       <div className="mt-8">
         <Card>
           <CardHeader>
             <SectionTitle icon={ShoppingCart} title="My Grocery List" desc="Add items manually or from your plan"/>
           </CardHeader>
+        </Card>
+        <Card>
           <CardContent>
             <GroceryList user={user} />
           </CardContent>
