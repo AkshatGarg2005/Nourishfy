@@ -34,7 +34,7 @@ function getPreview(defVals) {
 export default function Dashboard() {
   const [user, setUser] = useState(null);
 
-  // Start empty; we’ll restore from Firestore
+  // Persisted builder values
   const [defVals, setDefVals] = useState([]);
   const [symVals, setSymVals] = useState([]);
   const [excVals, setExcVals] = useState([]);
@@ -42,9 +42,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [lastPlan, setLastPlan] = useState(null);
   const [foodImages, setFoodImages] = useState({});
+  const [profile, setProfile] = useState(null); // 🔹 live profile from users/{uid}
   const nav = useNavigate();
 
-  // Load user, last plan, food image cache, and builder state
+  // Auth + initial fetches (plans, images, builder prefs)
   useEffect(() => {
     return watchAuth(async (u) => {
       setUser(u);
@@ -59,7 +60,7 @@ export default function Dashboard() {
 
       // Live image cache
       const fiRef = collection(db, 'users', u.uid, 'foodImages');
-      const unsub = onSnapshot(fiRef, (snap) => {
+      onSnapshot(fiRef, (snap) => {
         const map = {};
         snap.forEach(d => { const v = d.data(); if (v?.name) map[v.name] = v.url || ''; });
         setFoodImages(map);
@@ -74,10 +75,16 @@ export default function Dashboard() {
         if (Array.isArray(b.symVals)) setSymVals(b.symVals);
         if (Array.isArray(b.excVals)) setExcVals(b.excVals);
       }
-
-      return () => unsub();
     });
   }, []);
+
+  // Subscribe to users/{uid} for profile (even segments ✅)
+  useEffect(() => {
+    if (!user) return;
+    const ref = doc(db, 'users', user.uid);
+    const unsub = onSnapshot(ref, (snap) => setProfile(snap.data() || null));
+    return () => unsub();
+  }, [user]);
 
   // Persist builder state (debounced)
   useEffect(() => {
@@ -138,7 +145,7 @@ export default function Dashboard() {
 
       await setDoc(doc(db, 'users', user.uid), { email: user.email, updatedAt: serverTimestamp() }, { merge: true });
 
-      nav('/plan'); // navigate like the prototype
+      nav('/plan');
     } catch (e) {
       alert('Generation failed: ' + e.message);
     } finally {
@@ -148,7 +155,6 @@ export default function Dashboard() {
 
   if (!user) return <div className="p-6">Loading…</div>;
 
-  // Suggestions: use latest plan’s foods (preview top 2) or fall back to heuristic preview
   const planSuggestions = (lastPlan?.output?.foods || []).slice(0, 2);
   const preview = planSuggestions.length ? planSuggestions : getPreview(defVals);
 
@@ -241,8 +247,14 @@ export default function Dashboard() {
               <SectionTitle icon={Activity} title="Health Profile"/>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="flex items-center justify-between text-sm"><span className="text-neutral-600">Age</span><span>19 years</span></div>
-              <div className="flex items-center justify-between text-sm"><span className="text-neutral-600">Activity</span><span>Moderate</span></div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Age</span>
+                <span>{profile?.age != null ? `${profile.age}` : '–'}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-neutral-600 dark:text-neutral-400">Activity</span>
+                <span>{profile?.activity || '–'}</span>
+              </div>
               <Button variant="outline" className="w-full mt-2">Edit</Button>
             </CardContent>
           </Card>
