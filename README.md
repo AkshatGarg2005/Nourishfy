@@ -262,6 +262,7 @@ MIT — do whatever you’d like, at your own risk.
 ---
 
 ## 🔗 Urls
+* Website: https://github.com/AkshatGarg2005/Nourishfy
 * Android App: https://github.com/AkshatGarg2005/Nourishfy-android-app
 * IOS App: https://github.com/AkshatGarg2005/Nourishfy-ios-app
 ---
